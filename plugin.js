@@ -3,7 +3,6 @@
     tinymce.PluginManager.add( 'tinymce-live-readability-checker', function( editor ) {
 
 var textvar; // Contains text already present in editor
-var keyCodes = [32, 8, 46]; // Contains the keyCodes for space, del, and del.
 var lastId; // Stores the smallest unused id number to count from
 var cursorNode; // Catches the current element where the cursor is placed
 var textpos; // Catches the current position of the cursor within node or element
@@ -11,10 +10,19 @@ const htags = "h1, h2, h3, h4, h5, h6";
 const maxWordsSentence = 20;
 const maxWordsSection = 150;
 
-editor.on('loadContent', function() {
-textvar = editor.getContent({format: 'text'});
-console.log("TinyMCE container: " + textvar.slice(20));
-main(textvar);
+editor.on('LoadContent', function() {
+textvar = editor.getBody();
+refreshReadability();
+});
+
+editor.on('keyup', function() {
+textvar = editor.getBody();
+refreshReadability();
+});
+
+editor.on('PastePostProcess', function() {
+textvar = editor.getBody();
+refreshReadability();
 });
 
 // Don't access container, access content directly:
@@ -27,27 +35,39 @@ function main(text) {
    setConstraints(text);
 }
 
+function refreshReadability() {
+    var text = editor.getContent({format: 'text'});
+    rebuildSentences(text);
+    updateTooLongClasses();
+}
+
+function rebuildSentences(text) {
+    if (!textvar) {
+        textvar = editor.getBody();
+    }
+    lastId = 1;
+    textvar.innerHTML = '';
+    findSentences(text);
+}
+
 /* Parses the whole text and wraps each sentence in a span with a unique id
  * Only runs once when user inputs a whole new text */
 function findSentences(text) {
-    // Search for . to distinguish between sentences
+    if (!text) {
+        return;
+    }
+    var sentences = text.match(/[^.!?]+[.!?]?/g) || [];
     var i = 1;
-    while (text.search(/\./) > 0) {
-        var pos = text.search(/\./);
-        sentence = text.slice(0, pos + 1);
-        span = makeSpan(i, sentence, true);
-        // Check wordcount of sentence
+    sentences.forEach(function(sentence) {
+        var cleanSentence = sentence.trim();
+        if (cleanSentence.length === 0) {
+            return;
+        }
+        var span = makeSpan(i, cleanSentence, true);
         findTooLong(span.id);
         i++;
-        text = text.slice(pos + 2);
-    }
-    // Make span for loose words without .    
-    if (text.length > 0) {
-       span = makeSpan(i, text, true);
-       findTooLong(span.id);
-    }
-    // First unused id number to assign to new sentences
-    lastId = i + 1;
+    });
+    lastId = i;
 }
 
 /* Designates pasted text with as a section by surrounding it with a section tag */
@@ -83,24 +103,22 @@ function makeSpan(id, content, insertAsChild) {
  */
 function findTooLong(id) {
         var sentence = document.getElementById(id);
-        var togo = sentence.innerText.trim() + " ";
-        // Counts first space as first word
-        var wordcount = 0;
-        // Cuts sentence in words, counts words per sentence with wordcount.
-        while(togo.search(/\s/) > 0) {
-            var wordpos = togo.search(/\s/);
-                wordcount++;
-                    if (wordcount > maxWordsSentence) {
-                        sentence.classList.add("sentence-tl");
-                    }
-                    else {
-                        sentence.classList.remove("sentence-tl");
-                    }
-            if (wordcount !== sentence.getAttribute("data-words")) {
-            sentence.setAttribute("data-words", wordcount);
-            }
-            togo = togo.slice(wordpos + 1);
-    }
+        if (!sentence) {
+            return false;
+        }
+        var words = sentence.innerText.trim().split(/\s+/).filter(Boolean);
+        var wordcount = words.length;
+        var tooLong = wordcount > maxWordsSentence;
+        sentence.classList.toggle("sentence-tl", tooLong);
+        sentence.setAttribute("data-words", wordcount);
+        return tooLong;
+}
+
+function updateTooLongClasses() {
+    var spans = textvar ? textvar.querySelectorAll("span") : [];
+    spans.forEach(function(span) {
+        findTooLong(span.id);
+    });
 }
 
 /* Removes the outest section tag to make space for multiple section tags.
@@ -245,42 +263,6 @@ function wrapHeading() {
 // every range that has over 0 characters ( = signify letters or words), wrap in new span tag, so text format is preserved.
 // then run findSections over whole text to include new heading into section formation
 }
-
-/* Event Listener: Updates readability checks when Space, Backspace, Delete, or Period is pressed.*/
-div.addEventListener("keyup", function(event) {
-	const key = event.key;
-        // Get current element
-        cursorNode = window.getSelection().anchorNode.parentElement;
-        // Get current position of cursor
-        textpos = window.getSelection().focusOffset;
-        // On keyup space, delete, del
-        if (keyArray.includes(key)) {
-            console.log("Fired: " + key);
-            findTooLong(cursorNode.id);
-            findLongSection(cursorNode.parentElement.id);
-            // If the node is missing a period (because it has just been deleted), join with next node.
-            var noPeriod = cursorNode.innerText.search(/\./) < 0;
-            if (noPeriod) {
-                // Join nodes
-                joinSentence(cursorNode);
-                // Set cursor to last position in text node
-                setCursor(cursorNode.firstChild, textpos);
-            }
-        }
-        // On keyup of new period, split node in two nodes
-        if (key === "Enter") {
-        splitSentence(cursorNode);
-        // Deal with period placed in last node
-        if (document.getElementById(lastId - 1).nextElementSibling.isSameNode(document.getElementById("lastSpan"))) {
-            console.log("Period placed in last node!");
-            setCursor(document.getElementById(lastId - 1), 1);
-        }
-        else {
-            setCursor(cursorNode, 1);
-        }
-    }
-});
-     
 
 var nodeListener = function(event) {
     if (event.target.nodeName === "H4") {

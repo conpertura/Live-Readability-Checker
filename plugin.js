@@ -17,6 +17,25 @@ console.log("TinyMCE container: " + textvar.slice(20));
 main(textvar);
 });
 
+function saveSelectionState() {
+    return {
+        rng: editor.selection.getRng(),
+        bookmark: editor.selection.getBookmark(2, true)
+    };
+}
+
+function restoreSelectionState(state) {
+    if (!state) {
+        return;
+    }
+
+    if (state.bookmark) {
+        editor.selection.moveToBookmark(state.bookmark);
+    } else if (state.rng) {
+        editor.selection.setRng(state.rng);
+    }
+}
+
 // Don't access container, access content directly:
 // 2. Store in variable textvar and add HTML tags
 // 3. Reinsert with tinymce.activeEditor.setContent()
@@ -168,6 +187,7 @@ function findLongSection(id) {
 
 /* Removes all existing sections, and checks the document for new or altered sections */
 function updateSections(where) {
+        var selectionState = saveSelectionState();
         var allsections = where.querySelectorAll("section");
         var j;
         for (j of allsections) {
@@ -176,6 +196,7 @@ function updateSections(where) {
             where.removeChild(j);
         }
         findSections(where);
+        restoreSelectionState(selectionState);
 }
 
 /* Closes node at first . and inserts rest of content into new following node
@@ -214,22 +235,15 @@ function joinSentence(node) {
  * node = textnode (domnode.firstChild),
  * pos = any number for offset within textnode */
 function setCursor(node, pos) {
-   editor.setContent(textvar)
-// Creates range object
-    var setpos = document.createRange();
-// Creates object for selection
-    var set = window.getSelection();
-// Set start and end position of range
-        setpos.setStart(node, pos);
-// Collapse range within its boundary points
-// Returns boolean
+    var doc = editor.getDoc();
+    var setpos = doc.createRange();
+    var selection = editor.selection;
+    var targetNode = node.firstChild || node;
+    var startOffset = targetNode.nodeType === Node.TEXT_NODE ? Math.min(pos, targetNode.length) : Math.min(pos, targetNode.childNodes.length);
+    setpos.setStart(targetNode, startOffset);
     setpos.collapse(true);
-// Remove all ranges set
-    set.removeAllRanges();
-// Add range with respect to range object.
-    set.addRange(setpos);
-// Set cursor on focus
-    tinymce.activeEditor.focus();
+    selection.setRng(setpos);
+    editor.focus();
 }
 
 /* Helper function to provide text headings for section assignment */

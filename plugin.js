@@ -1,6 +1,6 @@
 (function() {
 
-    tinymce.PluginManager.add( 'tinymce-live-readability-checker', function( editor ) {
+    tinymce.PluginManager.add('tinymce-live-readability-checker', function(editor) {
 
 var textvar; // Contains text already present in editor
 var lastId; // Stores the smallest unused id number to count from
@@ -25,15 +25,14 @@ textvar = editor.getBody();
 refreshReadability();
 });
 
-// Don't access container, access content directly:
-// 2. Store in variable textvar and add HTML tags
-// 3. Reinsert with tinymce.activeEditor.setContent()
-// No need for cursor reset? Just setContent and write on?
+        /* Rebuilds sentence spans from the current editor content. Captures and restores
+         * the cursor position so setContent does not move the caret unexpectedly. */
+        function rebuildFromEditorContent() {
+            if (isUpdating) {
+                return;
+            }
 
-function main(text) {
-   findSentences(text);
-   setConstraints(text);
-}
+            isUpdating = true;
 
 function refreshReadability() {
     var text = editor.getContent({format: 'text'});
@@ -70,19 +69,7 @@ function findSentences(text) {
     lastId = i;
 }
 
-/* Designates pasted text with as a section by surrounding it with a section tag */
-function setConstraints(where) {
-    // Make empty span at the end for navigation purposes
-    makeSpan("lastSpan", "", true);
-    // Wrap everything in a section tag
-    if (document.querySelector("section") === null) {
-    var section = document.createElement("section");
-    section.setAttribute("id", "navSection");
-    var towrap = document.createRange();
-    towrap.selectNodeContents(spantext);
-    towrap.surroundContents(section);
-    }
-}
+            editor.setContent(html);
 
 /* Helper function to create a span element with specific content */
 function makeSpan(id, content, insertAsChild) {
@@ -121,100 +108,27 @@ function updateTooLongClasses() {
     });
 }
 
-/* Removes the outest section tag to make space for multiple section tags.
- * Only runs when outest section tag is present, does nothing otherwise
- */
-function removeNavSection(where) {
-    var navSection = document.getElementById("navSection");
-                if (navSection !== null) {
-                    var html = navSection.innerHTML;
-                    where.insertAdjacentHTML("afterbegin", html);
-                    where.removeChild(navSection);
-                } 
-}
-
-/* Wraps the text between two heading tags in a section tag
- * Precondition: findTooLong
- */
-function findSections(where) {
-    removeNavSection(where);
-    var headings = where.querySelectorAll(htags);
-        var i = 0;
-        while (i < headings.length) {
-            var range = document.createRange();
-            var section = document.createElement('section');
-            var next = (i + 1);
-            var idnr = "s" + next;
-            section.setAttribute("id", idnr);
-            var heading1 = headings[i];
-            var heading2 = headings[next];
-            range.setStartAfter(heading1);
-            if (next === headings.length) {
-                range.setEndBefore(where.lastElementChild); 
-            }
-            else {
-               range.setEndBefore(heading2);
-            }
-            section.appendChild(range.extractContents());
-            range.insertNode(section);
-            // Count words in section, requires findSentences first
-            findLongSection(idnr);
-            i++;
+            isUpdating = false;
         }
-    }
 
-
-/* Finds a section tag and counts its total words.
-* Precondition: findSentences, findTooLong, and findSections to obtain ids and "data-words" attribute
-*/
-function findLongSection(id) {
-    var section = document.getElementById(id);
-    var wordcount = 0;
-    var k;
-    var spans = section.querySelectorAll("span");
-    for (k of spans) {
-    wordcount += parseInt(k.getAttribute("data-words"));
-    }
-    section.setAttribute("data-words", wordcount);
-    if (wordcount > maxWordsSection) {
-       section.classList.add("section-tl"); 
-    }
-    else {
-       section.classList.remove("section-tl");  
-    }
-}
-
-/* Removes all existing sections, and checks the document for new or altered sections */
-function updateSections(where) {
-        var allsections = where.querySelectorAll("section");
-        var j;
-        for (j of allsections) {
-            var html = j.innerHTML;
-            j.insertAdjacentHTML("beforebegin", html);
-            where.removeChild(j);
+        /* Splits the provided text into sentences, preserving trailing periods and
+         * assigning sequential IDs. */
+        function parseSentences(text) {
+            const matches = text.match(/[^.]+\.|[^.]+$/g) || [];
+            lastId = 1;
+            return matches.map(sentence => {
+                const trimmed = sentence.trim();
+                const words = countWords(trimmed);
+                const data = {
+                    id: lastId,
+                    text: trimmed,
+                    words: words,
+                    isTooLong: words > maxWordsSentence
+                };
+                lastId += 1;
+                return data;
+            });
         }
-        findSections(where);
-}
-
-/* Closes node at first . and inserts rest of content into new following node
-* node = window.getSelection().anchorNode.parentElement
-* pos = window.getSelection().focusOffset
-*/
-function splitSentence(node) {
-    var text = node.innerText;
-    // Get position of first occurring .
-    var firstper = text.search(/\./);
-    // If first . is not at end of span
-    if (firstper < (text.length - 1)) {
-        var toend = text.slice(firstper + 2);
-        var idmem = lastId;
-        var span = makeSpan(lastId, toend, false);
-        node.parentElement.insertBefore(span, node.nextElementSibling);
-        findTooLong(idmem);
-        // Shorten previous node and put in correct format
-        node.innerText = text.slice(0, firstper + 1).trim() + " ";
-    }
-    }
 
 /* Deletes next node and joins its contents with given node
  * node = window.getSelection().anchorNode.parentElement
@@ -271,8 +185,10 @@ var nodeListener = function(event) {
     }
 };
 
-editor.on("DOMNodeInserted", nodeListener, false);
-editor.on("DOMNodeRemoved", nodeListener, false);
-
-});
+        /* Counts the number of words in a sentence. */
+        function countWords(sentence) {
+            const words = sentence.match(/\S+/g);
+            return words ? words.length : 0;
+        }
+    });
 })();

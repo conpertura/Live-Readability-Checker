@@ -10,11 +10,54 @@ var textpos; // Catches the current position of the cursor within node or elemen
 const htags = "h1, h2, h3, h4, h5, h6";
 const maxWordsSentence = 20;
 const maxWordsSection = 150;
+var headingObserver;
+
+function getEditorDocument() {
+    return editor.getDoc ? editor.getDoc() : document;
+}
+
+function getEditorRoot() {
+    var editorDoc = getEditorDocument();
+    if (editorDoc && editorDoc.body) {
+        return editorDoc.body;
+    }
+    return document.body;
+}
+
+function isHeadingNode(node) {
+    return node && node.nodeType === 1 && node.matches && node.matches(htags);
+}
+
+function observeHeadingChanges() {
+    var root = getEditorRoot();
+    if (!root) {
+        return;
+    }
+
+    if (headingObserver) {
+        headingObserver.disconnect();
+    }
+
+    headingObserver = new MutationObserver(function(mutations) {
+        for (var mutation of mutations) {
+            var addedHeading = Array.from(mutation.addedNodes || []).some(isHeadingNode);
+            var removedHeading = Array.from(mutation.removedNodes || []).some(isHeadingNode);
+            if (addedHeading || removedHeading) {
+                updateSections(getEditorRoot());
+                break;
+            }
+        }
+    });
+
+    headingObserver.observe(root, { childList: true, subtree: true });
+}
 
 editor.on('loadContent', function() {
-textvar = editor.getContent({format: 'text'});
-console.log("TinyMCE container: " + textvar.slice(20));
-main(textvar);
+var root = getEditorRoot();
+textvar = root;
+console.log("TinyMCE container: " + (root.innerHTML || '').slice(0, 20));
+main(root ? root.innerText : "");
+observeHeadingChanges();
 });
 
 // Don't access container, access content directly:
@@ -25,6 +68,7 @@ main(textvar);
 function main(text) {
    findSentences(text);
    setConstraints(text);
+   updateSections(getEditorRoot());
 }
 
 /* Parses the whole text and wraps each sentence in a span with a unique id
@@ -55,22 +99,24 @@ function setConstraints(where) {
     // Make empty span at the end for navigation purposes
     makeSpan("lastSpan", "", true);
     // Wrap everything in a section tag
-    if (document.querySelector("section") === null) {
-    var section = document.createElement("section");
-    section.setAttribute("id", "navSection");
-    var towrap = document.createRange();
-    towrap.selectNodeContents(spantext);
-    towrap.surroundContents(section);
+    var editorDoc = getEditorDocument();
+    var root = getEditorRoot();
+    if (root.querySelector("section") === null) {
+        var section = editorDoc.createElement("section");
+        section.setAttribute("id", "navSection");
+        var towrap = editorDoc.createRange();
+        towrap.selectNodeContents(spantext);
+        towrap.surroundContents(section);
     }
 }
 
 /* Helper function to create a span element with specific content */
 function makeSpan(id, content, insertAsChild) {
-    var span = document.createElement("span");
+    var span = getEditorDocument().createElement("span");
         span.setAttribute("id", id);
         span.innerHTML = content + " ";
         if (insertAsChild) {
-        textvar.appendChild(span);    
+        textvar.appendChild(span);
         }
         if (id === lastId) {
             lastId++;
@@ -82,7 +128,7 @@ function makeSpan(id, content, insertAsChild) {
  * Precondition: findSentences to obtain ids.
  */
 function findTooLong(id) {
-        var sentence = document.getElementById(id);
+        var sentence = getEditorRoot().ownerDocument.getElementById(id);
         var togo = sentence.innerText.trim() + " ";
         // Counts first space as first word
         var wordcount = 0;
@@ -107,24 +153,25 @@ function findTooLong(id) {
  * Only runs when outest section tag is present, does nothing otherwise
  */
 function removeNavSection(where) {
-    var navSection = document.getElementById("navSection");
+    var navSection = where.ownerDocument.getElementById("navSection");
                 if (navSection !== null) {
                     var html = navSection.innerHTML;
                     where.insertAdjacentHTML("afterbegin", html);
                     where.removeChild(navSection);
-                } 
+                }
 }
 
 /* Wraps the text between two heading tags in a section tag
  * Precondition: findTooLong
  */
 function findSections(where) {
-    removeNavSection(where);
-    var headings = where.querySelectorAll(htags);
+    var root = where || getEditorRoot();
+    removeNavSection(root);
+    var headings = root.querySelectorAll(htags);
         var i = 0;
         while (i < headings.length) {
-            var range = document.createRange();
-            var section = document.createElement('section');
+            var range = root.ownerDocument.createRange();
+            var section = root.ownerDocument.createElement('section');
             var next = (i + 1);
             var idnr = "s" + next;
             section.setAttribute("id", idnr);
@@ -132,7 +179,7 @@ function findSections(where) {
             var heading2 = headings[next];
             range.setStartAfter(heading1);
             if (next === headings.length) {
-                range.setEndBefore(where.lastElementChild); 
+                range.setEndBefore(root.lastElementChild);
             }
             else {
                range.setEndBefore(heading2);
@@ -150,7 +197,7 @@ function findSections(where) {
 * Precondition: findSentences, findTooLong, and findSections to obtain ids and "data-words" attribute
 */
 function findLongSection(id) {
-    var section = document.getElementById(id);
+    var section = getEditorRoot().ownerDocument.getElementById(id);
     var wordcount = 0;
     var k;
     var spans = section.querySelectorAll("span");
@@ -168,14 +215,15 @@ function findLongSection(id) {
 
 /* Removes all existing sections, and checks the document for new or altered sections */
 function updateSections(where) {
-        var allsections = where.querySelectorAll("section");
+        var root = where || getEditorRoot();
+        var allsections = root.querySelectorAll("section");
         var j;
         for (j of allsections) {
             var html = j.innerHTML;
             j.insertAdjacentHTML("beforebegin", html);
-            where.removeChild(j);
+            root.removeChild(j);
         }
-        findSections(where);
+        findSections(root);
 }
 
 /* Closes node at first . and inserts rest of content into new following node
@@ -216,9 +264,10 @@ function joinSentence(node) {
 function setCursor(node, pos) {
    editor.setContent(textvar)
 // Creates range object
-    var setpos = document.createRange();
+    var editorDoc = getEditorDocument();
+    var setpos = editorDoc.createRange();
 // Creates object for selection
-    var set = window.getSelection();
+    var set = editorDoc.defaultView.getSelection();
 // Set start and end position of range
         setpos.setStart(node, pos);
 // Collapse range within its boundary points
@@ -235,11 +284,12 @@ function setCursor(node, pos) {
 /* Helper function to provide text headings for section assignment */
 function wrapHeading() {
     // make range from mouse selection
-    var towrap = window.getSelection().getRangeAt(0);
+    var editorDoc = getEditorDocument();
+    var towrap = editorDoc.defaultView.getSelection().getRangeAt(0);
 // get current span
 // remove span tags
     // wrap range in h4 tags
-    var atag = document.createElement("h4");
+    var atag = editorDoc.createElement("h4");
     towrap.surroundContents(atag);
 // make three ranges, one before selection, selection, and one after selection
 // every range that has over 0 characters ( = signify letters or words), wrap in new span tag, so text format is preserved.
@@ -271,9 +321,10 @@ div.addEventListener("keyup", function(event) {
         if (key === "Enter") {
         splitSentence(cursorNode);
         // Deal with period placed in last node
-        if (document.getElementById(lastId - 1).nextElementSibling.isSameNode(document.getElementById("lastSpan"))) {
+        var editorDoc = getEditorDocument();
+        if (editorDoc.getElementById(lastId - 1).nextElementSibling.isSameNode(editorDoc.getElementById("lastSpan"))) {
             console.log("Period placed in last node!");
-            setCursor(document.getElementById(lastId - 1), 1);
+            setCursor(editorDoc.getElementById(lastId - 1), 1);
         }
         else {
             setCursor(cursorNode, 1);
@@ -282,15 +333,16 @@ div.addEventListener("keyup", function(event) {
 });
      
 
-var nodeListener = function(event) {
-    if (event.target.nodeName === "H4") {
-        console.log("Heading altered! ", event.target);
-        updateSections(textvar);
+editor.on('NodeChange', function(event) {
+    var targetNode = event && event.element;
+    var parentNodes = (event && event.parents) || [];
+    if (!targetNode) {
+        return;
     }
-};
-
-editor.on("DOMNodeInserted", nodeListener, false);
-editor.on("DOMNodeRemoved", nodeListener, false);
+    if (isHeadingNode(targetNode) || parentNodes.some(isHeadingNode)) {
+        updateSections(getEditorRoot());
+    }
+});
 
 });
 })();

@@ -19,5 +19,18 @@ function register_plugin( $plugin_array ) {
 }
 // Load the TinyMCE plugin
 add_filter( 'mce_external_plugins', 'register_plugin' );
- 
+
+function tinymce_live_readability_styles( $mce_init ) {
+    $style  = '.sentence-tl { background-color: #ffecec; color: #a00; }';
+    if ( isset( $mce_init['content_style'] ) ) {
+        $mce_init['content_style'] .= ' ' . $style;
+    } else {
+        $mce_init['content_style'] = $style;
+    }
+
+    return $mce_init;
+}
+
+add_filter( 'tiny_mce_before_init', 'tinymce_live_readability_styles' );
+
 ?>
